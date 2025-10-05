@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tormgibbs/godrop/internal/server"
 	"github.com/tormgibbs/godrop/internal/tunnel"
+	"github.com/tormgibbs/godrop/internal/util"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -23,7 +25,10 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("missing path argument")
 		}
 
-		path := args[0]
+		path, err := util.ExpandPath(args[0])
+		if err != nil {
+			return fmt.Errorf("failed to expand path: %w", err)
+		}
 
 		info, err := os.Stat(path)
 		if err != nil {
@@ -34,7 +39,11 @@ var rootCmd = &cobra.Command{
 		}
 
 		if info.IsDir() {
-			return fmt.Errorf("%s is a directory — directory sharing not supported yet", path)
+			zipFileName := filepath.Join(".", filepath.Base(path)+".zip")
+			if err := util.ZipDirectory(path, zipFileName); err != nil {
+				return fmt.Errorf("failed to zip directory: %w", err)
+			}
+			path = zipFileName
 		}
 
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -79,7 +88,6 @@ var rootCmd = &cobra.Command{
 		return nil
 	},
 }
-
 
 func Execute() {
 	err := rootCmd.Execute()
