@@ -4,10 +4,16 @@ Copyright © 2025 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/tormgibbs/godrop/internal/server"
+	"github.com/tormgibbs/godrop/internal/tunnel"
+	"golang.org/x/sync/errgroup"
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -23,14 +29,17 @@ to quickly create a Cobra application.`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return fmt.Errorf("missing path argument")
+		}
+
 		path := args[0]
 
 		info, err := os.Stat(path)
-		if os.IsNotExist(err) {
-			return fmt.Errorf("path %q doesn’t exist", path)
-		}
-
 		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("path %q doesn’t exist", path)
+			}
 			return fmt.Errorf("error checking path: %w", err)
 		}
 
@@ -38,7 +47,29 @@ to quickly create a Cobra application.`,
 			return fmt.Errorf("%s is a directory — directory sharing not supported yet", path)
 		}
 
-		fmt.Printf("sharing file %s\n", path)
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+
+		group, ctx := errgroup.WithContext(ctx)
+
+		ready := make(chan struct{})
+
+		group.Go(func() error {
+			fmt.Printf("sharing file %s\n", path)
+			return server.Start(ctx, path, ready)
+		})
+
+		group.Go(func() error {
+			<-ready
+			return tunnel.Start(ctx)
+		})
+
+		if err := group.Wait(); err != nil {
+			return fmt.Errorf("run failed: %w", err)
+		}
+
+		fmt.Println("all services stopped cleanly")
+
 		return nil
 	},
 }
