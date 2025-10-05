@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/briandowns/spinner"
 	"github.com/spf13/cobra"
 	"github.com/tormgibbs/godrop/internal/server"
 	"github.com/tormgibbs/godrop/internal/tunnel"
@@ -54,21 +56,37 @@ to quickly create a Cobra application.`,
 
 		ready := make(chan struct{})
 
+		urlCh := make(chan string, 1)
+
+		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+		s.Suffix = " Preparing your file and establishing a secure tunnel..."
+		s.Start()
+
 		group.Go(func() error {
-			fmt.Printf("sharing file %s\n", path)
 			return server.Start(ctx, path, ready)
 		})
 
 		group.Go(func() error {
 			<-ready
-			return tunnel.Start(ctx)
+			return tunnel.Start(ctx, urlCh)
 		})
+
+		go func() {
+			select {
+			case url := <-urlCh:
+				s.Stop()
+				fmt.Printf("Your file is ready at: %s\n\n", url)
+				fmt.Println("This link is temporary and secure. Press Ctrl+C to stop sharing")
+			case <-ctx.Done():
+				s.Stop()
+			}
+		}()
 
 		if err := group.Wait(); err != nil {
 			return fmt.Errorf("run failed: %w", err)
 		}
 
-		fmt.Println("all services stopped cleanly")
+		fmt.Println("All services stopped. Your file is no longer being shared")
 
 		return nil
 	},

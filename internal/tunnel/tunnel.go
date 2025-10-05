@@ -12,7 +12,7 @@ import (
 
 var urlRegex = regexp.MustCompile(`https://[a-zA-Z0-9\-]+\.trycloudflare\.com`)
 
-func Start(ctx context.Context) error {
+func Start(ctx context.Context, urlCh chan<- string) error {
 	cmd := exec.CommandContext(ctx, "cloudflared", "tunnel", "--url", "http://localhost:8080")
 
 	stdout, err := cmd.StdoutPipe()
@@ -30,21 +30,28 @@ func Start(ctx context.Context) error {
 	}
 
 	var wg sync.WaitGroup
+	var once sync.Once
 	wg.Add(2)
 
-	scanOutput := func(r io.Reader) {
+	scan := func(r io.Reader) {
 		defer wg.Done()
 		scanner := bufio.NewScanner(r)
 		for scanner.Scan() {
 			line := scanner.Text()
 			if matches := urlRegex.FindString(line); matches != "" {
-				fmt.Printf("\n🌍  Public URL: %s\n\n", matches)
+				once.Do(func() {
+					select {
+					case urlCh <- matches:
+					case <-ctx.Done():
+					}
+				})
+				return
 			}
 		}
 	}
 
-	go scanOutput(stdout)
-	go scanOutput(stderr)
+	go scan(stdout)
+	go scan(stderr)
 
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {

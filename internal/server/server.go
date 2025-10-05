@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"path/filepath"
 	"time"
@@ -27,7 +26,6 @@ func Start(ctx context.Context, file string, ready chan<- struct{}) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		fmt.Printf("Server starting at http://localhost%s\n", server.Addr)
 		close(ready)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
