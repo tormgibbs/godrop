@@ -18,11 +18,21 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "godrop [file]",
+	Use:   "godrop [file|directory]",
 	Short: "Share a file securely over a temporary Cloudflare tunnel",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			return fmt.Errorf("missing path argument")
+		}
+
+		port, err := cmd.Flags().GetInt("port")
+		if err != nil {
+			return err
+		}
+
+		once, err := cmd.Flags().GetBool("once")
+		if err != nil {
+			return err
 		}
 
 		path, err := util.ExpandPath(args[0])
@@ -38,12 +48,23 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("error checking path: %w", err)
 		}
 
+		var fileToRemove string
+
 		if info.IsDir() {
 			zipFileName := filepath.Join(".", filepath.Base(path)+".zip")
 			if err := util.ZipDirectory(path, zipFileName); err != nil {
 				return fmt.Errorf("failed to zip directory: %w", err)
 			}
 			path = zipFileName
+
+			fileToRemove = zipFileName
+			defer func() {
+				if fileToRemove != "" {
+					if err := os.Remove(fileToRemove); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: Failed to remove temporary file %q: %v\n", fileToRemove, err)
+					}
+				}
+			}()
 		}
 
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -60,12 +81,12 @@ var rootCmd = &cobra.Command{
 		s.Start()
 
 		group.Go(func() error {
-			return server.Start(ctx, path, ready)
+			return server.Start(ctx, path, port, once, ready)
 		})
 
 		group.Go(func() error {
 			<-ready
-			return tunnel.Start(ctx, urlCh)
+			return tunnel.Start(ctx, port, urlCh)
 		})
 
 		go func() {
@@ -97,5 +118,7 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.Flags().BoolP("once", "o", false, "serve once and exit")
+	rootCmd.Flags().IntP("port", "p", 8080, "port to listen on")
 	rootCmd.SilenceUsage = true
 }

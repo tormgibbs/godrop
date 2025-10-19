@@ -12,8 +12,11 @@ import (
 
 var urlRegex = regexp.MustCompile(`https://[a-zA-Z0-9\-]+\.trycloudflare\.com`)
 
-func Start(ctx context.Context, urlCh chan<- string) error {
-	cmd := exec.CommandContext(ctx, "cloudflared", "tunnel", "--url", "http://localhost:8080")
+var readyConfirmationRegex = regexp.MustCompile(`INF Registered tunnel connection|INF Connected to Cloudflare|Tunnel is active at|tunnel is active at`)
+
+func Start(ctx context.Context, port int, urlCh chan<- string) error {
+	url := fmt.Sprintf("http://localhost:%d", port)
+	cmd := exec.CommandContext(ctx, "cloudflared", "tunnel", "--url", url)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -31,21 +34,30 @@ func Start(ctx context.Context, urlCh chan<- string) error {
 
 	var wg sync.WaitGroup
 	var once sync.Once
+	var tunnelURL string
 	wg.Add(2)
 
 	scan := func(r io.Reader) {
 		defer wg.Done()
 		scanner := bufio.NewScanner(r)
+
+		buf := make([]byte, 0, 64*1024)
+		scanner.Buffer(buf, 1024*1024)
+
 		for scanner.Scan() {
 			line := scanner.Text()
-			if matches := urlRegex.FindString(line); matches != "" {
+
+			if urlMatches := urlRegex.FindString(line); urlMatches != "" {
+				tunnelURL = urlMatches
+			}
+
+			if tunnelURL != "" && readyConfirmationRegex.MatchString(line) {
 				once.Do(func() {
 					select {
-					case urlCh <- matches:
+					case urlCh <- tunnelURL:
 					case <-ctx.Done():
 					}
 				})
-				return
 			}
 		}
 	}

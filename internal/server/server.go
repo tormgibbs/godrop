@@ -2,23 +2,42 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 )
 
-func Start(ctx context.Context, file string, ready chan<- struct{}) error {
+func Start(ctx context.Context, file string, port int, once bool, ready chan<- struct{}) error {
 	mux := http.NewServeMux()
 	filename := filepath.Base(file)
 
+	cancelCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+
+		if _, err := os.Stat(file); os.IsNotExist(err) {
+			http.Error(w, "File not found or has been removed.", http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, "Error accessing file.", http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Disposition", "attachment; filename="+filename)
 		w.Header().Set("Content-Type", "application/octet-stream")
 		http.ServeFile(w, r, file)
+
+		if once {
+			cancel()
+		}
+
 	})
 
 	server := &http.Server{
-		Addr:         ":8080",
+		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      mux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -35,7 +54,7 @@ func Start(ctx context.Context, file string, ready chan<- struct{}) error {
 	}()
 
 	select {
-	case <-ctx.Done():
+	case <-cancelCtx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
