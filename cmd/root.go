@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
+	qrcode "github.com/skip2/go-qrcode"
 	"github.com/spf13/cobra"
 	"github.com/tormgibbs/godrop/internal/server"
 	"github.com/tormgibbs/godrop/internal/tunnel"
@@ -155,6 +156,15 @@ var rootCmd = &cobra.Command{
 			select {
 			case url := <-urlCh:
 				s.Stop()
+
+				q, err := qrcode.New(url, qrcode.Medium)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: Failed to generate QR code: %v\n", err)
+				} else {
+					fmt.Printf("Scan to download:\n")
+					fmt.Println(q.ToSmallString(false))
+				}
+
 				fmt.Printf("Your file is ready at: %s\n\n", url)
 				fmt.Println("This link is temporary and secure. Press Ctrl+C to stop sharing")
 			case <-ctx.Done():
