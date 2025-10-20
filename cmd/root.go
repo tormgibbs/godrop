@@ -45,53 +45,93 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
-		path, err := util.ExpandPath(args[0])
-		if err != nil {
-			return fmt.Errorf("failed to expand path: %w", err)
-		}
-
-		info, err := os.Stat(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("path %q doesn’t exist", path)
-			}
-			return fmt.Errorf("error checking path: %w", err)
-		}
-
+		var servePath string
 		var fileToRemove string
 
-		if info.IsDir() {
-			zipFileName := filepath.Join(".", filepath.Base(path)+".zip")
-			if err := util.ZipDirectory(path, zipFileName); err != nil {
-				return fmt.Errorf("failed to zip directory: %w", err)
+		if len(args) == 1 {
+			path, err := util.ExpandPath(args[0])
+			if err != nil {
+				return fmt.Errorf("failed to expand path: %w", err)
 			}
-			path = zipFileName
-
-			fileToRemove = zipFileName
-			defer func() {
-				if fileToRemove != "" {
-					if err := os.Remove(fileToRemove); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: Failed to remove temporary file %q: %v\n", fileToRemove, err)
-					}
+			info, err := os.Stat(path)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return fmt.Errorf("path %q doesn’t exist", path)
 				}
-			}()
+				return fmt.Errorf("error checking path: %w", err)
+			}
+
+			if info.IsDir() {
+				zipFileName := filepath.Join(".", filepath.Base(path)+".zip")
+				if err := util.ZipDirectory(path, zipFileName); err != nil {
+					return fmt.Errorf("failed to zip directory: %w", err)
+				}
+				servePath = zipFileName
+				fileToRemove = zipFileName
+			} else {
+				servePath = path
+			}
+		} else {
+			expandedPaths := make([]string, 0, len(args))
+			for _, arg := range args {
+				path, err := util.ExpandPath(arg)
+				if err != nil {
+					return fmt.Errorf("failed to expand path %q: %w", arg, err)
+				}
+				if _, err := os.Stat(path); os.IsNotExist(err) {
+					return fmt.Errorf("path %q doesn't exist", path)
+				}
+				expandedPaths = append(expandedPaths, path)
+			}
+
+			zipFileName := "godrop_multi_share.zip"
+			if _, err := util.ZipPaths(expandedPaths, zipFileName); err != nil {
+				return fmt.Errorf("failed to zip multiple paths: %w", err)
+			}
+			servePath = zipFileName
+			fileToRemove = zipFileName
 		}
+
+		defer func() {
+			if fileToRemove != "" {
+				if err := os.Remove(fileToRemove); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: Failed to remove temporary file %q: %v\n", fileToRemove, err)
+				}
+			}
+		}()
 
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 
 		group, ctx := errgroup.WithContext(ctx)
 
-		ready := make(chan struct{})
+		ready := make(chan any)
 
 		urlCh := make(chan string, 1)
+
+		downloadCh := make(chan server.DownloadEvent)
 
 		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 		s.Suffix = " Preparing your file and establishing a secure tunnel..."
 		s.Start()
 
 		group.Go(func() error {
-			return server.Start(ctx, path, port, ready, limit)
+			for {
+				select {
+				case event := <-downloadCh:
+					fmt.Printf("\n[ACCESS LOG @ %s] Download initiated by IP: %s (Agent: %s)\n",
+						event.Timestamp.Format("15:04:05"),
+						event.IP,
+						event.UserAgent,
+					)
+				case <-ctx.Done():
+					return nil
+				}
+			}
+		})
+
+		group.Go(func() error {
+			return server.Start(ctx, servePath, port, ready, limit, downloadCh)
 		})
 
 		group.Go(func() error {

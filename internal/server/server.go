@@ -10,12 +10,19 @@ import (
 	"time"
 )
 
+type DownloadEvent struct {
+	Timestamp time.Time
+	IP        string
+	UserAgent string
+}
+
 func Start(
 	ctx context.Context,
 	file string,
 	port int,
-	ready chan<- struct{},
+	ready chan<- any,
 	downloadLimit int,
+	downloadCh chan<- DownloadEvent,
 ) error {
 	mux := http.NewServeMux()
 	filename := filepath.Base(file)
@@ -26,6 +33,21 @@ func Start(
 	defer cancel()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		ip := r.Header.Get("CF-Connecting-IP")
+		if ip == "" {
+			ip = r.RemoteAddr
+		}
+
+		event := DownloadEvent{
+			Timestamp: time.Now(),
+			IP:        ip,
+			UserAgent: r.Header.Get("User-Agent"),
+		}
+
+		select {
+		case downloadCh <- event:
+		default:
+		}
 
 		if _, err := os.Stat(file); os.IsNotExist(err) {
 			http.Error(w, "File not found or has been removed.", http.StatusNotFound)

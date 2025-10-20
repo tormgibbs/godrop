@@ -8,18 +8,60 @@ import (
 	"path/filepath"
 )
 
-func ZipDirectory(sourceDir, zipFileName string) error {
-	file, err := os.Create(zipFileName)
+func ZipDirectory(sourceDir, destZip string) error {
+	paths := []string{sourceDir}
+
+	count, err := ZipPaths(paths, destZip)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 
-	zipWriter := zip.NewWriter(file)
+	if count == 0 {
+		fmt.Printf("Warning: the directory is empty, the zip contains no files\n\n")
+	}
+
+	return nil
+}
+
+func ZipPaths(sourcePaths []string, destZip string) (int, error) {
+	outFile, err := os.Create(destZip)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create zip file %q: %w", destZip, err)
+	}
+	defer outFile.Close()
+
+	zipWriter := zip.NewWriter(outFile)
 	defer zipWriter.Close()
 
-	isEmpty := true
-	err = filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
+	var fileCount int
+
+	for _, sourcePath := range sourcePaths {
+		sourcePath = filepath.Clean(sourcePath)
+		info, err := os.Stat(sourcePath)
+		if err != nil {
+			return fileCount, fmt.Errorf("error stating source path %q: %w", sourcePath, err)
+		}
+
+		if info.IsDir() {
+			if err := addDirectoryToZip(zipWriter, sourcePath, info.Name(), &fileCount); err != nil {
+				return fileCount, err
+			}
+		} else {
+			if err := addFileToZip(zipWriter, sourcePath, info.Name(), &fileCount); err != nil {
+				return fileCount, err
+			}
+		}
+	}
+
+	if err := zipWriter.Close(); err != nil {
+		return fileCount, fmt.Errorf("error closing zip writer: %w", err)
+	}
+
+	return fileCount, nil
+}
+
+func addDirectoryToZip(zw *zip.Writer, sourceDir, baseDirInZip string, fileCount *int) error {
+	return filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -29,39 +71,58 @@ func ZipDirectory(sourceDir, zipFileName string) error {
 			return err
 		}
 
-		if relPath == "." {
-			return nil
-		}
+		zipPath := filepath.Join(baseDirInZip, relPath)
 
 		if info.IsDir() {
-			_, err := zipWriter.Create(relPath + "/")
-			return err
+			if relPath != "" {
+				_, err = zw.CreateHeader(&zip.FileHeader{
+					Name:     zipPath + "/",
+					Method:   zip.Deflate,
+					Modified: info.ModTime(),
+				})
+				if err != nil {
+					return fmt.Errorf("failed to create directory header for %q: %w", zipPath, err)
+				}
+			}
+		} else {
+			if err := addFileToZip(zw, path, zipPath, fileCount); err != nil {
+				return err
+			}
 		}
-
-		isEmpty = false
-
-		file, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-
-		writer, err := zipWriter.Create(relPath)
-		if err != nil {
-			return err
-		}
-
-		_, err = io.Copy(writer, file)
-		return err
+		return nil
 	})
+}
 
+func addFileToZip(zw *zip.Writer, filePath, zipPath string, fileCount *int) error {
+	file, err := os.Open(filePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open file %q: %w", filePath, err)
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat file %q: %w", filePath, err)
 	}
 
-	if isEmpty {
-		fmt.Printf("Warning: the directory is empty, the zip contains no files\n\n")
+	header, err := zip.FileInfoHeader(info)
+	if err != nil {
+		return fmt.Errorf("failed to create file header for %q: %w", filePath, err)
 	}
+
+	header.Name = zipPath
+	header.Method = zip.Deflate
+
+	writer, err := zw.CreateHeader(header)
+	if err != nil {
+		return fmt.Errorf("failed to create zip writer for %q: %w", filePath, err)
+	}
+
+	if _, err := io.Copy(writer, file); err != nil {
+		return fmt.Errorf("failed to copy file %q content: %w", filePath, err)
+	}
+
+	*fileCount++
 
 	return nil
 }

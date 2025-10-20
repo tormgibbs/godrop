@@ -1,18 +1,25 @@
 package util
 
 import (
-	"os/user"
+	"os"
 	"path/filepath"
+	"strings"
 )
 
-
 func ExpandPath(path string) (string, error) {
-	if len(path) > 0 && path[0] == '~' {
-		usr, err := user.Current()
+	if strings.HasPrefix(path, "~") {
+		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		path = filepath.Join(usr.HomeDir, path[1:])
+		path = strings.Replace(path, "~", home, 1)
 	}
-	return path, nil
+
+	path = os.ExpandEnv(path)
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return absPath, nil
 }
