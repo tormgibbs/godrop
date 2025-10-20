@@ -6,12 +6,21 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 )
 
-func Start(ctx context.Context, file string, port int, once bool, ready chan<- struct{}) error {
+func Start(
+	ctx context.Context,
+	file string,
+	port int,
+	ready chan<- struct{},
+	downloadLimit int,
+) error {
 	mux := http.NewServeMux()
 	filename := filepath.Base(file)
+
+	var downloadCount int32
 
 	cancelCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -30,8 +39,13 @@ func Start(ctx context.Context, file string, port int, once bool, ready chan<- s
 		w.Header().Set("Content-Type", "application/octet-stream")
 		http.ServeFile(w, r, file)
 
-		if once {
-			cancel()
+		if downloadLimit > 0 {
+			newCount := atomic.AddInt32(&downloadCount, 1)
+
+			if newCount >= int32(downloadLimit) {
+				cancel()
+			}
+
 		}
 
 	})

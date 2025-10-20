@@ -30,9 +30,19 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		once, err := cmd.Flags().GetBool("once")
+		limit, err := cmd.Flags().GetInt("limit")
 		if err != nil {
 			return err
+		}
+
+		if limit == 0 {
+			once, err := cmd.Flags().GetBool("once")
+			if err != nil {
+				return err
+			}
+			if once {
+				limit = 1
+			}
 		}
 
 		path, err := util.ExpandPath(args[0])
@@ -81,7 +91,7 @@ var rootCmd = &cobra.Command{
 		s.Start()
 
 		group.Go(func() error {
-			return server.Start(ctx, path, port, once, ready)
+			return server.Start(ctx, path, port, ready, limit)
 		})
 
 		group.Go(func() error {
@@ -120,5 +130,6 @@ func Execute() {
 func init() {
 	rootCmd.Flags().BoolP("once", "o", false, "serve once and exit")
 	rootCmd.Flags().IntP("port", "p", 8080, "port to listen on")
+	rootCmd.Flags().IntP("limit", "l", 0, "maximum number of downloads before shutting down (0 means no limit)")
 	rootCmd.SilenceUsage = true
 }
