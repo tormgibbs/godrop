@@ -4,8 +4,16 @@ import (
 	"archive/zip"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"time"
+)
+
+var (
+	nouns      = []string{"fox", "owl", "star", "cloud", "tree", "river", "moon", "sun", "rock", "wave", "breeze", "shard", "gem", "mist", "dawn", "dusk", "flame", "peak", "canyon", "echo"}
+	adjectives = []string{"quick", "silent", "bright", "dark", "clear", "calm", "swift", "deep", "soft", "loud", "fresh", "frozen", "warm", "shining", "gentle", "smooth", "rough", "hollow", "solid", "vivid"}
+	r          = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
 func ZipDirectory(sourceDir, destZip string) error {
@@ -125,4 +133,10 @@ func addFileToZip(zw *zip.Writer, filePath, zipPath string, fileCount *int) erro
 	*fileCount++
 
 	return nil
+}
+
+func GenerateRandomName() string {
+	adj := adjectives[r.Intn(len(adjectives))]
+	noun := nouns[r.Intn(len(nouns))]
+	return fmt.Sprintf("%s-%s", adj, noun)
 }

@@ -45,6 +45,11 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
+		zipNameFlag, err := cmd.Flags().GetString("zip-name")
+		if err != nil {
+			return err
+		}
+
 		var servePath string
 		var fileToRemove string
 
@@ -84,7 +89,14 @@ var rootCmd = &cobra.Command{
 				expandedPaths = append(expandedPaths, path)
 			}
 
-			zipFileName := "godrop_multi_share.zip"
+			var baseName string
+			if zipNameFlag != "" {
+				baseName = zipNameFlag
+			} else {
+				baseName = util.GenerateRandomName()
+			}
+
+			zipFileName := baseName
 			if _, err := util.ZipPaths(expandedPaths, zipFileName); err != nil {
 				return fmt.Errorf("failed to zip multiple paths: %w", err)
 			}
@@ -171,5 +183,6 @@ func init() {
 	rootCmd.Flags().BoolP("once", "o", false, "serve once and exit")
 	rootCmd.Flags().IntP("port", "p", 8080, "port to listen on")
 	rootCmd.Flags().IntP("limit", "l", 0, "maximum number of downloads before shutting down (0 means no limit)")
+	rootCmd.Flags().StringP("zip-name", "z", "", "specify the name for the temporary zip file (used when sharing multiple items)")
 	rootCmd.SilenceUsage = true
 }
